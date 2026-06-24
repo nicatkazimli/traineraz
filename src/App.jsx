@@ -2,8 +2,8 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
-import Client from "./pages/Client";
 import Register from "./pages/Register"
+import ClientView from "./pages/ClientView";
 
 function App() {
   return (
@@ -15,7 +15,7 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/client" element={<Client />} />
+          <Route path="/client" element={<ClientView />} />
         </Routes>
       </div>
     </Router>

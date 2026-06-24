@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { LogIn, Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import BackButton from "../components/BackButton";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -40,7 +41,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center p-6 relative overflow-hidden">
+      <div className="relative">
+      <BackButton /> {/* İstənilən yerə qoy, fixed olduğu üçün həmişə sol yuxarıda qalacaq */}
       
+      {/* Səhifənin qalan kodları burada... */}
+    </div>
       {/* Arka fon işığı */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
 
