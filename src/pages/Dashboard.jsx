@@ -4,11 +4,13 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [profile, setProfile] = useState(null);
   const [clients, setClients] = useState([]);
+  const [chartData, setChartData] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [clientForm, setClientForm] = useState({ id: null, name: '', fields: [{ label: '', value: '' }] });
@@ -21,28 +23,23 @@ export default function Dashboard() {
   async function fetchInitialData() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { navigate("/login"); return; }
+    
     const { data: prof } = await supabase.from("traineraz").select("*").eq("id", user.id).single();
     setProfile(prof);
+    
     const { data: clientList } = await supabase.from("clients").select("*").eq("trainer_id", user.id);
     setClients(clientList || []);
-  }
-
-  // Profil şəklini linklə yeniləmə funksiyası
-  const updateProfileImageUrl = async () => {
-    const newUrl = prompt("Profil şəklinin linkini daxil et (https://...):", profile?.image_url || "");
-    if (newUrl === null) return;
-
-    const { error } = await supabase
-      .from('traineraz')
-      .update({ image_url: newUrl })
-      .eq('id', profile.id);
-
-    if (error) {
-      alert("Xəta baş verdi: " + error.message);
-    } else {
-      fetchInitialData();
+    
+    if (clientList) {
+      const counts = clientList.reduce((acc, client) => {
+        const date = new Date(client.created_at).toLocaleString('az', { month: 'short' });
+        acc[date] = (acc[date] || 0) + 1;
+        return acc;
+      }, {});
+      const formatted = Object.keys(counts).map(month => ({ name: month, musteri: counts[month] }));
+      setChartData(formatted);
     }
-  };
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -97,11 +94,8 @@ export default function Dashboard() {
         
         {activeTab === "dashboard" ? (
           <div className="space-y-8">
-            <div className="flex items-center gap-6">
-              <div>
-                <h1 className="text-3xl font-bold">Xoş gəldin, {profile?.full_name?.split(" ")[0]}! 👋</h1>
-               
-              </div>
+            <div>
+              <h1 className="text-3xl font-bold">Xoş gəldin, {profile?.full_name?.split(" ")[0]}! 👋</h1>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -117,6 +111,40 @@ export default function Dashboard() {
                 <ShieldCheck className="text-emerald-500" size={32}/>
                 <div><p className="text-emerald-500 font-bold">Sistem Aktivdir</p><p className="text-zinc-500 text-xs">Versiya 1.0.0</p></div>
               </div>
+            </div>
+
+            {/* Trading Desk Qrafik */}
+            <div className="h-72 w-full bg-[#0B0E14] p-6 rounded-3xl border border-[#1E222D] shadow-2xl">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-[#848E9C] font-bold uppercase tracking-widest text-xs">Müştəri axını analitikası</h3>
+                <div className="flex gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-[10px] text-emerald-500 font-mono tracking-widest">LIVE DATA</span>
+                </div>
+              </div>
+              
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1E222D" vertical={false} />
+                  <defs>
+                    <linearGradient id="colorMusteri" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="name" stroke="#373A46" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#373A46" fontSize={10} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ backgroundColor: '#1E222D', border: '1px solid #373A46', borderRadius: '8px', fontSize: '12px' }} />
+                  <Area 
+                    type="step" 
+                    dataKey="musteri" 
+                    stroke="#10b981" 
+                    strokeWidth={2} 
+                    fill="url(#colorMusteri)" 
+                    activeDot={{ r: 6, fill: '#10b981', stroke: '#000', strokeWidth: 2 }} 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
         ) : (
@@ -144,7 +172,7 @@ export default function Dashboard() {
         )}
       </main>
 
-      {/* Delete/Client Modals... */}
+      {/* Digər komponentlər (Modal və Silmə təsdiqi) eyni qalır... */}
       {deleteConfirm.isOpen && (
         <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-emerald-500/50 p-6 rounded-3xl w-full max-w-xs shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]">

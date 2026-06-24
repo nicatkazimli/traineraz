@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import BackButton from "../components/BackButton";
+import { motion, AnimatePresence } from "framer-motion"; // Lazımdır
 
 export default function ClientView() {
   const [code, setCode] = useState("");
   const [client, setClient] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showError, setShowError] = useState(false); // Yeni: Xəta modalı üçün
 
   const fetchClientData = async () => {
     setLoading(true);
@@ -15,18 +17,43 @@ export default function ClientView() {
       .eq("access_code", code.toUpperCase())
       .single();
 
-    if (data) setClient(data);
-    else alert("Kod tapılmadı, yenidən yoxlayın!");
+    if (data) {
+      setClient(data);
+    } else {
+      setShowError(true); // Alert yerinə modalı aktivləşdiririk
+    }
     setLoading(false);
   };
 
-  // --- GİRİŞ EKRANI (Əgər client hələ yoxdursa) ---
   if (!client) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-        {/* Giriş ekranı üçün BackButton */}
         <BackButton />
         
+        {/* Xəta Modalı */}
+        <AnimatePresence>
+          {showError && (
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                className="bg-zinc-900 border border-red-500/30 p-6 rounded-3xl w-full max-w-xs shadow-[0_0_40px_rgba(239,68,68,0.15)] text-center"
+              >
+                <h3 className="text-white font-bold text-lg mb-2">Kod tapılmadı!</h3>
+                <p className="text-zinc-400 text-sm mb-6">Daxil etdiyiniz kod yanlışdır və ya sistemdə mövcud deyil.</p>
+                <button 
+                  onClick={() => setShowError(false)}
+                  className="w-full bg-red-500/10 border border-red-500/20 text-red-500 py-3 rounded-xl font-bold hover:bg-red-500 hover:text-white transition-all"
+                >
+                  OK
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="bg-zinc-900 p-8 rounded-3xl border border-zinc-800 w-full max-w-sm text-center shadow-2xl">
           <h2 className="text-2xl font-bold mb-6 text-white">Müştəri Girişi</h2>
           <input 
@@ -46,12 +73,10 @@ export default function ClientView() {
     );
   }
 
-  // --- MÜŞTƏRİ DETALLARI EKRANI (Əgər client varsa) ---
+  // --- MÜŞTƏRİ DETALLARI EKRANI ---
   return (
     <div className="min-h-screen bg-zinc-950 p-6 text-zinc-100">
-      {/* Detallar ekranı üçün BackButton */}
       <BackButton />
-
       <div className="max-w-2xl mx-auto pt-16">
         <h1 className="text-3xl font-bold mb-8">Salam, {client.full_name}! 👋</h1>
         <div className="grid gap-4">

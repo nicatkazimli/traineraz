@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { UserPlus, Mail, Lock, User, Briefcase, Award, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
+import { UserPlus, Mail, Lock, User, Eye, EyeOff, Loader2, CheckCircle2, Check, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from "framer-motion";
 import BackButton from "../components/BackButton";
 
@@ -11,17 +11,38 @@ export default function Register() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  
+  const [isOther, setIsOther] = useState(false);
+  const [customSpecialty, setCustomSpecialty] = useState('');
+  const [selectedSpecialty, setSelectedSpecialty] = useState('Bodibildinq / Fitnes');
+  const [isLocked, setIsLocked] = useState(false); // Seçimin kilidlənməsi üçün
 
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     password: '',
-    specialty: 'Bodibildinq / Fitnes',
     experience: '1-3 il'
   });
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === 'specialty') {
+      if (value === 'Digər') {
+        setIsOther(true);
+      } else {
+        setSelectedSpecialty(value);
+      }
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
+  };
+
+  const confirmCustomSpecialty = () => {
+    if (customSpecialty.trim()) {
+      setSelectedSpecialty(customSpecialty);
+      setIsOther(false);
+      setIsLocked(true);
+    }
   };
 
   const handleRegister = async (e) => {
@@ -40,16 +61,14 @@ export default function Register() {
       if (authData?.user) {
         const { error: dbError } = await supabase
           .from('traineraz')
-          .insert([
-            {
-              id: authData.user.id,
-              full_name: formData.fullName,
-              specialty: formData.specialty,
-              experience: formData.experience,
-              rating: "5.0",
-              image_url: ""
-            }
-          ]);
+          .insert([{
+            id: authData.user.id,
+            full_name: formData.fullName,
+            specialty: selectedSpecialty,
+            experience: formData.experience,
+            rating: "5.0",
+            image_url: ""
+          }]);
 
         if (dbError) throw dbError;
 
@@ -67,20 +86,10 @@ export default function Register() {
     <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center p-6 relative overflow-hidden">
       <BackButton />
       
-      {/* Başarı Modalı */}
       <AnimatePresence>
         {showSuccess && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-zinc-900 border border-emerald-500/30 p-8 rounded-3xl text-center w-full max-w-xs shadow-[0_0_50px_rgba(16,185,129,0.2)]"
-            >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-zinc-900 border border-emerald-500/30 p-8 rounded-3xl text-center w-full max-w-xs shadow-[0_0_50px_rgba(16,185,129,0.2)]">
               <div className="mx-auto w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6">
                 <CheckCircle2 className="w-8 h-8 text-emerald-500" />
               </div>
@@ -95,11 +104,8 @@ export default function Register() {
 
       <div className="w-full max-w-lg bg-zinc-900/40 border border-zinc-900 backdrop-blur-xl rounded-3xl p-8 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative z-10">
         <div className="text-center mb-8">
-          <div className="h-12 w-12 rounded-2xl bg-emerald-500 flex items-center justify-center font-black text-black text-xl mx-auto shadow-[0_0_20px_rgba(16,185,129,0.3)] mb-4">
-            T
-          </div>
+          <div className="h-12 w-12 rounded-2xl bg-emerald-500 flex items-center justify-center font-black text-black text-xl mx-auto shadow-[0_0_20px_rgba(16,185,129,0.3)] mb-4">T</div>
           <h2 className="text-3xl font-black uppercase tracking-tight">Hesabını Yarat</h2>
-          <p className="text-zinc-500 text-xs uppercase tracking-widest mt-1.5">Trainer.az Peşəkarlar Şəbəkəsi</p>
         </div>
 
         {errorMsg && (
@@ -125,6 +131,40 @@ export default function Register() {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-zinc-400">İxtisas</label>
+              {isOther ? (
+                <div className="flex gap-2">
+                  <input type="text" autoFocus placeholder="Yaz..." className="w-full bg-zinc-950 border border-emerald-500 rounded-xl px-4 py-3 text-sm outline-none" value={customSpecialty} onChange={(e) => setCustomSpecialty(e.target.value)} required />
+                  <button type="button" onClick={confirmCustomSpecialty} className="bg-emerald-500 p-3 rounded-xl text-zinc-950"><Check size={18} /></button>
+                </div>
+              ) : isLocked ? (
+                <div className="flex items-center justify-between bg-zinc-950 border border-emerald-500/50 rounded-xl px-4 py-3 text-sm text-white">
+                  {selectedSpecialty}
+                  <button type="button" onClick={() => { setIsLocked(false); setIsOther(true); }}><Pencil size={14} className="text-emerald-500" /></button>
+                </div>
+              ) : (
+                <select name="specialty" value={selectedSpecialty} onChange={handleChange} className="w-full bg-zinc-950 border border-zinc-800/80 rounded-xl px-4 py-3 text-sm focus:border-emerald-500 outline-none font-medium appearance-none cursor-pointer text-zinc-300">
+                  <option value="Bodibildinq / Fitnes">Bodibildinq / Fitnes</option>
+                  <option value="Krossfit / Ağır Atletika">Krossfit / Ağır Atletika</option>
+                  <option value="Kardio / Arıqlama">Kardio / Arıqlama</option>
+                  <option value="Digər">Digər</option>
+                </select>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-zinc-400">Təcrübə</label>
+              <select name="experience" value={formData.experience} onChange={handleChange} className="w-full bg-zinc-950 border border-zinc-800/80 rounded-xl px-4 py-3 text-sm focus:border-emerald-500 outline-none font-medium appearance-none cursor-pointer text-zinc-300">
+                <option value="1-3 il">1-3 il</option>
+                <option value="3-5 il">3-5 il</option>
+                <option value="5+ il">5-10 il</option>
+                <option value="5+ il">10+ il</option>
+              </select>
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold uppercase tracking-widest text-zinc-400">Şifrə</label>
             <div className="relative">
@@ -134,17 +174,6 @@ export default function Register() {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-bold uppercase tracking-widest text-zinc-400">İxtisas / Sahə</label>
-            <select name="specialty" value={formData.specialty} onChange={handleChange} className="w-full bg-zinc-950 border border-zinc-800/80 rounded-xl pl-4 py-3 text-sm focus:border-emerald-500 outline-none font-medium appearance-none cursor-pointer text-zinc-300">
-              <option value="Bodibildinq / Fitnes">Bodibildinq / Fitnes</option>
-              <option value="Krossfit / Ağır Atletika">Krossfit / Ağır Atletika</option>
-              <option value="Kardio / Arıqlama">Kardio / Arıqlama</option>
-              <option value="Yoqa / Pilates">Yoqa / Pilates</option>
-              <option value="Boks / Kikboks">Boks / Kikboks</option>
-            </select>
           </div>
 
           <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-black text-sm px-5 py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.15)] active:scale-[0.99] mt-2">
