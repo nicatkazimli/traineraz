@@ -316,7 +316,7 @@ function SectionTitle({ icon: Icon, label, color = "text-zinc-400" }) {
   );
 }
 
-function StatCard({ label, value, unit, color = "text-white", icon: Icon, iconColor = "text-zinc-600" }) {
+function StatCard({ label, value, unit, color = "text-white", icon: Icon, iconColor = "text-zinc-600", valueClassName = "" }) {
   return (
     <motion.div
       whileHover={{ scale: 1.02, borderColor: "rgba(255,255,255,0.12)" }}
@@ -327,9 +327,9 @@ function StatCard({ label, value, unit, color = "text-white", icon: Icon, iconCo
         <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold">{label}</span>
         {Icon && <Icon size={14} className={iconColor} />}
       </div>
-      <span className={`text-3xl font-black tracking-tight ${color}`}>
+      <span className={`${valueClassName || "text-3xl"} font-black tracking-tight ${color} truncate`}>
         {value}
-        <span className="text-sm font-normal text-zinc-500 ml-1.5">{unit}</span>
+        {unit && <span className="text-sm font-normal text-zinc-500 ml-1.5">{unit}</span>}
       </span>
     </motion.div>
   );
@@ -1019,7 +1019,7 @@ export default function ClientView() {
               <div className="grid grid-cols-2 gap-3">
                 <StatCard label="Son yuxu" value={sleepLogs[0].hours} unit="saat" icon={Moon}
                   color={sleepLogs[0].hours>=7?"text-emerald-400":"text-yellow-400"} iconColor="text-purple-500" />
-                <StatCard label="Keyfiyyət" value={"⭐".repeat(sleepLogs[0].quality)} unit="" icon={Star} iconColor="text-yellow-600" />
+                <StatCard label="Keyfiyyət" value={"⭐".repeat(sleepLogs[0].quality)} unit="" icon={Star} iconColor="text-yellow-600" valueClassName="text-xl" />
               </div>
             )}
             <div className="bg-zinc-900/50 p-5 rounded-3xl border border-white/6 space-y-4">
