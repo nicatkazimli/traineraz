@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Trophy, Flame, Target, Zap, Activity, Dumbbell, Loader2, Star,
   TrendingUp, Apple, ChevronRight, Droplets, Moon, Scale, Award,
-  BarChart2, X, Plus, Minus, Check, CheckCheck, AlertCircle
+  BarChart2, X, Plus, Minus, Check, CheckCheck, AlertCircle, Camera, User
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -15,6 +15,7 @@ import {
 // ─── Sabitlər ────────────────────────────────────────────────────────────────
 const CALORIE_GOAL = 2000;
 const WATER_GOAL = 8;
+const AVATAR_BUCKET = "avatars"; // Supabase Storage-də public bucket adı
 
 // ─── Tarix köməkçiləri (artıq WEEK_MS yoxdur — gün dəyişimi təqvim tarixinə görə) ──
 function todayKey() {
@@ -352,8 +353,59 @@ function InputField({ placeholder, value, onChange, onKeyDown, type = "text", cl
       value={value}
       onChange={onChange}
       onKeyDown={onKeyDown}
-      className={`bg-black/60 p-4 rounded-xl border border-zinc-800 focus:border-emerald-500/70 focus:bg-black/80 transition-all duration-200 outline-none text-white text-base placeholder:text-zinc-600 w-full ${className}`}
+      className={`bg-black/60 p-4 rounded-xl border border-zinc-800 focus:border-emerald-500/70 focus:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 transition-all duration-200 outline-none text-white text-base placeholder:text-zinc-600 w-full ${className}`}
     />
+  );
+}
+
+// ─── Profil Şəkli Komponenti ───────────────────────────────────────────────────
+function AvatarUploader({ avatarUrl, uploading, onUpload, name }) {
+  const fileInputRef = useRef(null);
+  const initial = (name || "?").trim().charAt(0).toLocaleUpperCase("az");
+
+  return (
+    <div className="relative flex-shrink-0">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={onUpload}
+      />
+      <motion.button
+        type="button"
+        whileHover={{ scale: 1.03 }}
+        whileTap={{ scale: 0.96 }}
+        onClick={() => fileInputRef.current?.click()}
+        aria-label="Profil şəklini dəyiş"
+        className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden border-2 border-white/10 bg-zinc-900 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 transition-all duration-200 hover:border-emerald-500/40"
+      >
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="Profil şəkli" className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-4xl sm:text-5xl font-black text-zinc-600">{initial || <User size={36} />}</span>
+        )}
+
+        {/* Yükləmə overlay-i */}
+        <AnimatePresence>
+          {uploading && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/70 flex items-center justify-center"
+            >
+              <Loader2 size={26} className="animate-spin text-emerald-400" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Kamera nişanı */}
+        {!uploading && (
+          <div className="absolute bottom-0 right-0 w-8 h-8 bg-emerald-500 rounded-tl-xl flex items-center justify-center shadow-lg shadow-black/40">
+            <Camera size={16} className="text-black" strokeWidth={2.5} />
+          </div>
+        )}
+      </motion.button>
+    </div>
   );
 }
 
@@ -366,6 +418,11 @@ export default function ClientView() {
   const [hydrated, setHydrated] = useState(false);
   const [syncing, setSyncing] = useState(false); // serverə yazılarkən kiçik indikator üçün
   const saveTimerRef = useRef(null);
+
+  // Profil şəkli
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
 
   // YENİ: weekStartedAt əvəzinə tarix-əsaslı izləmə
   const [lastResetDate, setLastResetDate] = useState(null); // "YYYY-MM-DD"
@@ -426,6 +483,62 @@ export default function ClientView() {
     setWeekData(s.weekData); setFoodItems(s.foodItems); setCalories(s.calories);
     setMacros(s.macros); setWaterCups(s.waterCups); setSleepLogs(s.sleepLogs);
     setWeightLogs(s.weightLogs); setUnlockedAch(s.unlockedAch);
+  };
+
+  // ─── Profil şəkli — client yükləndikdə mövcud avatarı tətbiq et ────────────
+  useEffect(() => {
+    setAvatarUrl(client?.avatar_url || null);
+  }, [client?.access_code, client?.avatar_url]);
+
+  // ─── Profil şəkli yükləmə — Supabase Storage + clients cədvəlinə yazma ──────
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !client) return;
+
+    if (!file.type.startsWith("image/")) {
+      setAvatarError("Yalnız şəkil faylı yükləyə bilərsən.");
+      setTimeout(() => setAvatarError(""), 3000);
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAvatarError("Şəkil 5MB-dan kiçik olmalıdır.");
+      setTimeout(() => setAvatarError(""), 3000);
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setAvatarError("");
+    try {
+      const ext = file.name.split(".").pop();
+      const filePath = `${client.access_code.toUpperCase()}-${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .upload(filePath, file, { upsert: true, cacheControl: "3600" });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(filePath);
+      const publicUrl = urlData?.publicUrl;
+      if (!publicUrl) throw new Error("Public URL alınmadı");
+
+      const { error: updateError } = await supabase
+        .from("clients")
+        .update({ avatar_url: publicUrl })
+        .eq("access_code", client.access_code.toUpperCase());
+
+      if (updateError) throw updateError;
+
+      setAvatarUrl(publicUrl);
+      setClient((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+    } catch (err) {
+      console.error("handleAvatarUpload error:", err);
+      setAvatarError("Şəkil yüklənmədi. Yenidən cəhd et.");
+      setTimeout(() => setAvatarError(""), 3500);
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = "";
+    }
   };
 
   // ─── Hydration — Supabase-dən yüklə, təqvim tarixinə görə gün sıfırlanması ──
@@ -627,7 +740,7 @@ export default function ClientView() {
                 <h3 className="text-white font-black text-xl mb-1">Kod tapılmadı!</h3>
                 <p className="text-zinc-500 text-sm mb-5">Zəhmət olmasa düzgün kodu daxil edin.</p>
                 <button onClick={() => setShowError(false)}
-                  className="w-full bg-red-500 py-3.5 rounded-2xl font-black text-white text-base hover:bg-red-400 active:scale-95 transition-all">
+                  className="w-full bg-red-500 py-3.5 rounded-2xl font-black text-white text-base hover:bg-red-400 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 transition-all">
                   Yenidən cəhd et
                 </button>
               </motion.div>
@@ -658,7 +771,7 @@ export default function ClientView() {
               className="text-center uppercase tracking-[0.2em] text-lg font-bold mb-3"
             />
             <button onClick={fetchClientData}
-              className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black text-lg hover:bg-emerald-400 active:scale-95 transition-all duration-150 flex items-center justify-center gap-2">
+              className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black text-lg hover:bg-emerald-400 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-all duration-150 flex items-center justify-center gap-2">
               {loading ? <Loader2 size={22} className="animate-spin" /> : <>Daxil ol <ChevronRight size={20} /></>}
             </button>
           </div>
@@ -750,7 +863,7 @@ export default function ClientView() {
                 ))}
               </div>
               <button onClick={() => setWeekSummary(null)}
-                className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black text-base hover:bg-emerald-400 active:scale-95 transition-all">
+                className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black text-base hover:bg-emerald-400 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-all">
                 Yeni günə başla 🚀
               </button>
             </motion.div>
@@ -761,21 +874,37 @@ export default function ClientView() {
       <div className="max-w-xl mx-auto px-4 pt-16 pb-28 space-y-5">
 
         {/* Header */}
-        <motion.div initial={{opacity:0,y:-10}} animate={{opacity:1,y:0}} className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-black bg-gradient-to-r from-white via-zinc-300 to-zinc-600 bg-clip-text text-transparent tracking-tight">
-              Salam, {capitalizeName(client.full_name.split(" ")[0])}! 👋
-            </h1>
-            <p className="text-zinc-500 text-base mt-1">Bugün nə etdin?</p>
-            <p className="text-zinc-700 text-sm mt-0.5 flex items-center gap-1.5">
-              <Target size={12} className="text-zinc-700" />
-              Ay dövrü: {dayNumber}/30-cu gün — saat 00:00-da yeni gün başlayır
-              {syncing && <span className="text-zinc-600 ml-1">· saxlanılır...</span>}
-            </p>
+        <motion.div initial={{opacity:0,y:-10}} animate={{opacity:1,y:0}} className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-4 min-w-0">
+            <AvatarUploader
+              avatarUrl={avatarUrl}
+              uploading={uploadingAvatar}
+              onUpload={handleAvatarUpload}
+              name={client.full_name}
+            />
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-black bg-gradient-to-r from-white via-zinc-300 to-zinc-600 bg-clip-text text-transparent tracking-tight truncate">
+                Salam, {capitalizeName(client.full_name.split(" ")[0])}! 👋
+              </h1>
+              <p className="text-zinc-500 text-base mt-1">Bugün nə etdin?</p>
+              <p className="text-zinc-700 text-sm mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <Target size={12} className="text-zinc-700 flex-shrink-0" />
+                <span>Ay dövrü: {dayNumber}/30-cu gün — saat 00:00-da yeni gün başlayır</span>
+                {syncing && <span className="text-zinc-600">· saxlanılır...</span>}
+              </p>
+              <AnimatePresence>
+                {avatarError && (
+                  <motion.p initial={{opacity:0,y:-4}} animate={{opacity:1,y:0}} exit={{opacity:0}}
+                    className="text-red-400 text-xs font-semibold mt-1.5 flex items-center gap-1">
+                    <AlertCircle size={12} /> {avatarError}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
           {streak > 0 && (
             <motion.div initial={{scale:0}} animate={{scale:1}} transition={{type:"spring"}}
-              className="flex flex-col items-center gap-1 bg-orange-500/10 border border-orange-500/20 px-4 py-3 rounded-2xl">
+              className="flex flex-col items-center gap-1 bg-orange-500/10 border border-orange-500/20 px-4 py-3 rounded-2xl flex-shrink-0">
               <Flame size={20} className="text-orange-400" />
               <span className="text-orange-400 font-black text-base leading-none">{streak}</span>
               <span className="text-orange-500/70 text-xs font-medium">gün</span>
@@ -791,7 +920,7 @@ export default function ClientView() {
             return (
               <motion.button key={t.id} onClick={() => setActiveTab(t.id)}
                 whileHover={{scale:1.03}} whileTap={{scale:0.96}}
-                className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 flex-shrink-0 ${
+                className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
                   active
                     ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20"
                     : "bg-zinc-900/80 text-zinc-400 border border-white/6 hover:border-white/12 hover:text-zinc-300"
@@ -836,7 +965,7 @@ export default function ClientView() {
                 ].map((item) => (
                   <div key={item.key} className="relative">
                     <input type="number" placeholder={item.p}
-                      className="w-full bg-black/60 p-4 pt-3 pb-3 rounded-xl border border-zinc-800 focus:border-emerald-500/60 transition-all duration-200 outline-none text-white text-base placeholder:text-zinc-600"
+                      className="w-full bg-black/60 p-4 pt-3 pb-3 rounded-xl border border-zinc-800 focus:border-emerald-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 transition-all duration-200 outline-none text-white text-base placeholder:text-zinc-600"
                       value={logs[item.key]}
                       onChange={(e) => { setLogs({...logs,[item.key]:e.target.value}); setLogError(false); }}
                     />
@@ -844,7 +973,7 @@ export default function ClientView() {
                 ))}
               </div>
               <motion.button onClick={handleLog} whileTap={{scale:0.97}}
-                className="w-full bg-white text-black py-4 rounded-2xl font-black text-base hover:bg-emerald-400 transition-all duration-200 flex items-center justify-center gap-2">
+                className="w-full bg-white text-black py-4 rounded-2xl font-black text-base hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-all duration-200 flex items-center justify-center gap-2">
                 {isLogging ? <Loader2 size={20} className="animate-spin" /> : <><Check size={18} /> Sistemi Yenilə</>}
               </motion.button>
             </div>
@@ -924,7 +1053,7 @@ export default function ClientView() {
                 />
                 <div className="flex items-center gap-1">
                   <input type="number"
-                    className="w-16 bg-black/60 p-3 rounded-xl border border-zinc-800 focus:border-emerald-500/60 outline-none text-white text-base text-center"
+                    className="w-16 bg-black/60 p-3 rounded-xl border border-zinc-800 focus:border-emerald-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 outline-none text-white text-base text-center"
                     placeholder="100" value={foodQty} onChange={(e) => setFoodQty(e.target.value)} />
                   <span className="text-zinc-600 text-sm font-medium">q</span>
                 </div>
@@ -937,7 +1066,7 @@ export default function ClientView() {
                 )}
               </AnimatePresence>
               <motion.button onClick={calculateCalories} whileTap={{scale:0.97}}
-                className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black text-base hover:bg-emerald-400 transition-all flex items-center justify-center gap-2">
+                className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black text-base hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-all flex items-center justify-center gap-2">
                 <Plus size={18} /> Əlavə Et
               </motion.button>
             </div>
@@ -955,7 +1084,8 @@ export default function ClientView() {
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-emerald-400 font-black text-base">{f.kcal} kcal</span>
-                        <motion.button whileTap={{scale:0.85}} onClick={() => removeFood(i)} className="text-zinc-600 hover:text-red-400 transition-colors p-1">
+                        <motion.button whileTap={{scale:0.85}} onClick={() => removeFood(i)}
+                          className="text-zinc-600 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 rounded-md transition-colors p-1">
                           <X size={15} />
                         </motion.button>
                       </div>
@@ -990,11 +1120,11 @@ export default function ClientView() {
 
               <div className="flex gap-3 justify-center">
                 <motion.button whileTap={{scale:0.9}} onClick={() => setWaterCups(c=>Math.max(0,c-1))}
-                  className="w-13 h-13 w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-all">
+                  className="w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 transition-all">
                   <Minus size={20} />
                 </motion.button>
                 <motion.button whileTap={{scale:0.96}} onClick={addWater}
-                  className="flex-1 max-w-xs bg-blue-500 text-white py-4 rounded-2xl font-black text-base hover:bg-blue-400 transition-all flex items-center justify-center gap-2">
+                  className="flex-1 max-w-xs bg-blue-500 text-white py-4 rounded-2xl font-black text-base hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 transition-all flex items-center justify-center gap-2">
                   <Droplets size={18} /> Stəkan əlavə et
                 </motion.button>
               </div>
@@ -1026,7 +1156,7 @@ export default function ClientView() {
               <SectionTitle icon={Moon} label="Yuxu Qeyd Et" color="text-purple-400" />
               {!sleepInput ? (
                 <motion.button whileTap={{scale:0.97}} onClick={() => setSleepInput(true)}
-                  className="w-full border border-dashed border-zinc-700 text-zinc-400 py-5 rounded-2xl font-bold text-base hover:border-zinc-500 hover:text-zinc-300 transition-all flex items-center justify-center gap-2">
+                  className="w-full border border-dashed border-zinc-700 text-zinc-400 py-5 rounded-2xl font-bold text-base hover:border-zinc-500 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/50 transition-all flex items-center justify-center gap-2">
                   <Plus size={18} /> Bu gecəki yuxunu əlavə et
                 </motion.button>
               ) : (
@@ -1040,16 +1170,16 @@ export default function ClientView() {
                     <div className="flex gap-1.5">
                       {[1,2,3,4,5].map((q) => (
                         <motion.button key={q} whileTap={{scale:0.9}} onClick={() => setSleepQuality(q)}
-                          className={`flex-1 min-w-0 py-2.5 rounded-lg text-xs font-black transition-all ${
+                          className={`flex-1 min-w-0 py-2.5 rounded-lg text-xs font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/50 transition-all ${
                             sleepQuality===q ? "bg-purple-500 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
                           }`}>{q}⭐</motion.button>
                       ))}
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => setSleepInput(false)} className="flex-1 bg-zinc-800 text-zinc-400 py-3.5 rounded-2xl font-bold text-base hover:bg-zinc-700 transition-all">Ləğv et</button>
+                    <button onClick={() => setSleepInput(false)} className="flex-1 bg-zinc-800 text-zinc-400 py-3.5 rounded-2xl font-bold text-base hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 transition-all">Ləğv et</button>
                     <motion.button whileTap={{scale:0.97}} onClick={logSleep}
-                      className="flex-1 bg-purple-500 text-white py-3.5 rounded-2xl font-black text-base flex items-center justify-center gap-2 hover:bg-purple-400 transition-all">
+                      className="flex-1 bg-purple-500 text-white py-3.5 rounded-2xl font-black text-base flex items-center justify-center gap-2 hover:bg-purple-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 transition-all">
                       <Check size={18} /> Qeyd et
                     </motion.button>
                   </div>
@@ -1091,7 +1221,7 @@ export default function ClientView() {
               <SectionTitle icon={Scale} label="Bədən Ölçüsü Qeyd Et" color="text-emerald-400" />
               {!showBodyForm ? (
                 <motion.button whileTap={{scale:0.97}} onClick={() => setShowBodyForm(true)}
-                  className="w-full border border-dashed border-zinc-700 text-zinc-400 py-5 rounded-2xl font-bold text-base hover:border-zinc-500 hover:text-zinc-300 transition-all flex items-center justify-center gap-2">
+                  className="w-full border border-dashed border-zinc-700 text-zinc-400 py-5 rounded-2xl font-bold text-base hover:border-zinc-500 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 transition-all flex items-center justify-center gap-2">
                   <Plus size={18} /> Bugünkü ölçüləri əlavə et
                 </motion.button>
               ) : (
@@ -1099,9 +1229,9 @@ export default function ClientView() {
                   <InputField type="number" placeholder="Çəki (kg) — məcburidir" value={weightInput} onChange={(e) => setWeightInput(e.target.value)} />
                   <InputField type="number" placeholder="Bel ölçüsü (sm) — istəyə bağlı" value={waistInput} onChange={(e) => setWaistInput(e.target.value)} />
                   <div className="flex gap-2">
-                    <button onClick={() => setShowBodyForm(false)} className="flex-1 bg-zinc-800 text-zinc-400 py-3.5 rounded-2xl font-bold text-base hover:bg-zinc-700 transition-all">Ləğv et</button>
+                    <button onClick={() => setShowBodyForm(false)} className="flex-1 bg-zinc-800 text-zinc-400 py-3.5 rounded-2xl font-bold text-base hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 transition-all">Ləğv et</button>
                     <motion.button whileTap={{scale:0.97}} onClick={logBody}
-                      className="flex-1 bg-emerald-500 text-black py-3.5 rounded-2xl font-black text-base flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all">
+                      className="flex-1 bg-emerald-500 text-black py-3.5 rounded-2xl font-black text-base flex items-center justify-center gap-2 hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 transition-all">
                       <Check size={18} /> Qeyd et
                     </motion.button>
                   </div>
