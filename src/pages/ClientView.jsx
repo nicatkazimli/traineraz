@@ -335,6 +335,15 @@ function StatCard({ label, value, unit, color = "text-white", icon: Icon, iconCo
   );
 }
 
+function capitalizeName(name) {
+  if (!name) return "";
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toLocaleUpperCase("az") + w.slice(1).toLocaleLowerCase("az"))
+    .join(" ");
+}
+
 function InputField({ placeholder, value, onChange, onKeyDown, type = "text", className = "" }) {
   return (
     <input
@@ -499,7 +508,7 @@ export default function ClientView() {
       if (!unlockedAch.includes(ach.id) && ach.condition(state)) {
         setUnlockedAch((prev) => [...prev, ach.id]);
         setNewAch(ach);
-        setTimeout(() => setNewAch(null), 3500);
+        setTimeout(() => setNewAch(null), 3000);
       }
     });
   };
@@ -698,16 +707,19 @@ export default function ClientView() {
         )}
       </AnimatePresence>
 
-      {/* Achievement popup */}
+      {/* Achievement popup — düz ortada, arxa fon blur */}
       <AnimatePresence>
         {newAch && (
-          <motion.div initial={{y:-100,opacity:0}} animate={{y:0,opacity:1}} exit={{y:-100,opacity:0}} transition={{type:"spring",stiffness:300,damping:25}}
-            className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 border border-yellow-500/40 px-5 py-4 rounded-2xl flex items-center gap-3 shadow-2xl max-w-xs w-full mx-4">
-            <div className="w-10 h-10 bg-yellow-500/10 rounded-xl flex items-center justify-center text-2xl">{newAch.icon}</div>
-            <div>
-              <p className="text-yellow-400 font-black text-sm">{newAch.title} açıldı!</p>
-              <p className="text-zinc-400 text-xs">{newAch.desc}</p>
-            </div>
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl p-4">
+            <motion.div initial={{scale:0.6,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:0.6,opacity:0}} transition={{type:"spring",stiffness:300,damping:22}}
+              className="bg-zinc-900 border border-yellow-500/40 px-6 py-7 rounded-3xl flex flex-col items-center gap-3 shadow-2xl max-w-xs w-full text-center">
+              <div className="w-16 h-16 bg-yellow-500/10 rounded-2xl flex items-center justify-center text-4xl">{newAch.icon}</div>
+              <div>
+                <p className="text-yellow-400 font-black text-lg">{newAch.title} açıldı!</p>
+                <p className="text-zinc-400 text-sm mt-1">{newAch.desc}</p>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -752,7 +764,7 @@ export default function ClientView() {
         <motion.div initial={{opacity:0,y:-10}} animate={{opacity:1,y:0}} className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-black bg-gradient-to-r from-white via-zinc-300 to-zinc-600 bg-clip-text text-transparent tracking-tight">
-              Salam, {client.full_name.split(" ")[0]}! 👋
+              Salam, {capitalizeName(client.full_name.split(" ")[0])}! 👋
             </h1>
             <p className="text-zinc-500 text-base mt-1">Bugün nə etdin?</p>
             <p className="text-zinc-700 text-sm mt-0.5 flex items-center gap-1.5">
@@ -967,10 +979,10 @@ export default function ClientView() {
               </div>
 
               {/* Stəkan vizual */}
-              <div className="flex justify-center gap-2 flex-wrap">
+              <div className="flex justify-center gap-1.5 flex-wrap px-2">
                 {[...Array(WATER_GOAL)].map((_,i) => (
                   <motion.div key={i} animate={{ scale: i<waterCups ? [1,1.15,1] : 1 }}
-                    className={`w-9 h-14 rounded-b-2xl rounded-t-lg border-2 transition-all duration-300 ${
+                    className={`w-6 h-10 rounded-b-xl rounded-t-md border-2 transition-all duration-300 ${
                       i<waterCups ? "bg-blue-500 border-blue-400" : "border-zinc-700"
                     }`} />
                 ))}
@@ -1025,10 +1037,10 @@ export default function ClientView() {
                   </div>
                   <div>
                     <p className="text-sm text-zinc-400 mb-2 font-medium">Keyfiyyəti necə idi?</p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5">
                       {[1,2,3,4,5].map((q) => (
                         <motion.button key={q} whileTap={{scale:0.9}} onClick={() => setSleepQuality(q)}
-                          className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${
+                          className={`flex-1 min-w-0 py-2.5 rounded-lg text-xs font-black transition-all ${
                             sleepQuality===q ? "bg-purple-500 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
                           }`}>{q}⭐</motion.button>
                       ))}
