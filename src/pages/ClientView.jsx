@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Trophy, Flame, Target, Zap, Activity, Dumbbell, Loader2, Star,
   TrendingUp, Apple, ChevronRight, Droplets, Moon, Scale, Award,
-  BarChart2, X, Plus, Minus, Check, CheckCheck, AlertCircle, Camera, User
+  BarChart2, X, Plus, Minus, Check, CheckCheck, AlertCircle, Camera, User,
+  ShoppingBag, ChevronDown, MessageCircle, Sparkles, Package
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -16,6 +17,87 @@ import {
 const CALORIE_GOAL = 2000;
 const WATER_GOAL = 8;
 const AVATAR_BUCKET = "avatars"; // Supabase Storage-də public bucket adı
+const PRODUCTS_BUCKET = "products"; // Mağaza məhsul şəkilləri üçün ayrıca bucket (istəyə bağlı istifadə)
+
+// ─── Mağaza / Tərəfdaş sponsorlar ──────────────────────────────────────────────
+// Hər mağaza öz WhatsApp + Instagram kontaktına sahibdir (aylıq yerləşdirmə haqqı ilə əlavə olunur)
+function toWhatsappLink(phone) {
+  const digits = phone.replace(/\D/g, "").replace(/^0/, "994");
+  return `https://wa.me/${digits}`;
+}
+
+const STORES = [
+  {
+    id: "store-1",
+    name: "PowerFit Nutrition",
+    category: "Protein & Qidalanma",
+    tagline: "Premium idman qidaları və proteinlər",
+    icon: "💪",
+    gradient: "from-emerald-500/20 to-emerald-500/5",
+    accent: "emerald",
+    whatsapp: "0513562838",
+    instagram: "https://www.instagram.com/nicatkazimli/",
+    products: [
+      // image: null olduqda emoji fallback göstərilir. Real şəkil üçün Supabase "products" bucket-ə yüklə,
+      // public URL-i buraya yapışdır, məsələn: image: "https://xxxx.supabase.co/storage/v1/object/public/products/whey.jpg"
+      { name: "Whey Protein", price: "65-90 AZN", icon: "🥤", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/100.avif" },
+      { name: "Fontactive Protein", price: "55-75 AZN", icon: "🥤", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/images%20(1).jpg" },
+      { name: "ISO100", price: "80-110 AZN", icon: "🥤", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/images.jpg" },
+      { name: "Beef Protein (Çiyələk)", price: "60-85 AZN", icon: "🥤", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/BeefProtein_strawberry_1816g_8l_600x600_28964eec-b747-4b33-9e69-da5b517f4a85.webp" },
+    ],
+  },
+  {
+    id: "store-2",
+    name: "Elite Supplements",
+    category: "Protein & Qidalanma",
+    tagline: "Peşəkar idmançılar üçün əlavələr",
+    icon: "🧪",
+    gradient: "from-blue-500/20 to-blue-500/5",
+    accent: "blue",
+    whatsapp: "0513562838",
+    instagram: "https://www.instagram.com/nicatkazimli/",
+    products: [
+      { name: "Mass Gainer 3kg", price: "70-95 AZN", icon: "📦", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/03902690_Muscletech_WheyProtein_Milkchocolate_2lb_New_Front_Web_1635x1227.jpg" },
+      { name: "Multivitamin", price: "18-25 AZN", icon: "💊", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/BESTPROTEIN-69SERVS-CHOCOLATEBROWNIE-TS.webp" },
+      { name: "Omega-3 Balıq Yağı", price: "22-30 AZN", icon: "🐟", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/FTN-products-v2-7.webp" },
+      { name: "Pre-Workout", price: "35-50 AZN", icon: "⚡", image: "https://cwgpxeduosdomwezfijf.supabase.co/storage/v1/object/public/products/images%20(2).jpg" },
+    ],
+  },
+  {
+    id: "store-3",
+    name: "IronGear AZ",
+    category: "İdman Ləvazimatları",
+    tagline: "Ev və zal üçün idman avadanlığı",
+    icon: "🏋️",
+    gradient: "from-purple-500/20 to-purple-500/5",
+    accent: "purple",
+    whatsapp: "0513562838",
+    instagram: "https://www.instagram.com/nicatkazimli/",
+    products: [
+      { name: "Reqlanabl Gantellər", price: "80-150 AZN", icon: "🏋️", image: null },
+      { name: "Yoga Xalçası", price: "15-25 AZN", icon: "🧘", image: null },
+      { name: "Rezistans Lentləri", price: "12-20 AZN", icon: "🎗️", image: null },
+      { name: "Turnik (qapı üçün)", price: "25-40 AZN", icon: "🔧", image: null },
+    ],
+  },
+  {
+    id: "store-4",
+    name: "FitStyle Wear",
+    category: "İdman Geyimləri",
+    tagline: "Rahat və dözümlü məşq geyimləri",
+    icon: "👕",
+    gradient: "from-orange-500/20 to-orange-500/5",
+    accent: "orange",
+    whatsapp: "0513562838",
+    instagram: "https://www.instagram.com/nicatkazimli/",
+    products: [
+      { name: "Məşq Şortu", price: "18-28 AZN", icon: "🩳", image: null },
+      { name: "Kompressiya Tişort", price: "22-32 AZN", icon: "👕", image: null },
+      { name: "İdman Ayaqqabısı", price: "60-120 AZN", icon: "👟", image: null },
+      { name: "Məşq Əlcəkləri", price: "10-18 AZN", icon: "🧤", image: null },
+    ],
+  },
+];
 
 // ─── Tarix köməkçiləri (artıq WEEK_MS yoxdur — gün dəyişimi təqvim tarixinə görə) ──
 function todayKey() {
@@ -336,6 +418,17 @@ function StatCard({ label, value, unit, color = "text-white", icon: Icon, iconCo
   );
 }
 
+// ─── Instagram ikonu (lucide-react-də mövcud olmadığı üçün əl ilə SVG) ─────────
+function InstagramIcon({ size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+      <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="12" r="4.3" stroke="currentColor" strokeWidth="2" />
+      <circle cx="17.4" cy="6.6" r="1.15" fill="currentColor" />
+    </svg>
+  );
+}
+
 function capitalizeName(name) {
   if (!name) return "";
   return name
@@ -409,7 +502,161 @@ function AvatarUploader({ avatarUrl, uploading, onUpload, name }) {
   );
 }
 
-// ─── Əsas Komponent ───────────────────────────────────────────────────────────
+// ─── Mağaza Accordion Komponenti ───────────────────────────────────────────────
+const ACCENT_STYLES = {
+  emerald: {
+    iconBg: "bg-emerald-500/15 border-emerald-500/25",
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    ring: "focus-visible:ring-emerald-500/50",
+    hoverBorder: "hover:border-emerald-500/30",
+    glow: "hover:shadow-emerald-500/5",
+    chip: "bg-emerald-500/8 border-emerald-500/15",
+    priceText: "text-emerald-400",
+  },
+  blue: {
+    iconBg: "bg-blue-500/15 border-blue-500/25",
+    badge: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    ring: "focus-visible:ring-blue-500/50",
+    hoverBorder: "hover:border-blue-500/30",
+    glow: "hover:shadow-blue-500/5",
+    chip: "bg-blue-500/8 border-blue-500/15",
+    priceText: "text-blue-400",
+  },
+  purple: {
+    iconBg: "bg-purple-500/15 border-purple-500/25",
+    badge: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    ring: "focus-visible:ring-purple-500/50",
+    hoverBorder: "hover:border-purple-500/30",
+    glow: "hover:shadow-purple-500/5",
+    chip: "bg-purple-500/8 border-purple-500/15",
+    priceText: "text-purple-400",
+  },
+  orange: {
+    iconBg: "bg-orange-500/15 border-orange-500/25",
+    badge: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    ring: "focus-visible:ring-orange-500/50",
+    hoverBorder: "hover:border-orange-500/30",
+    glow: "hover:shadow-orange-500/5",
+    chip: "bg-orange-500/8 border-orange-500/15",
+    priceText: "text-orange-400",
+  },
+};
+
+function StoreAccordion({ store, isOpen, onToggle }) {
+  const s = ACCENT_STYLES[store.accent] || ACCENT_STYLES.emerald;
+  const waMessage = encodeURIComponent(`Salam! ${store.name} mağazasından sifariş vermək istəyirəm.`);
+
+  return (
+    <motion.div
+      layout
+      className={`bg-zinc-900/50 rounded-3xl border border-white/6 overflow-hidden transition-colors duration-300 ${s.hoverBorder} hover:shadow-lg ${s.glow}`}
+    >
+      {/* Accordion başlığı */}
+      <motion.button
+        type="button"
+        onClick={onToggle}
+        whileTap={{ scale: 0.995 }}
+        aria-expanded={isOpen}
+        className={`w-full flex items-center gap-3.5 p-4 sm:p-5 text-left focus-visible:outline-none focus-visible:ring-2 ${s.ring} focus-visible:ring-inset transition-colors`}
+      >
+        <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl border flex items-center justify-center text-2xl sm:text-3xl flex-shrink-0 bg-gradient-to-br ${store.gradient} ${s.iconBg}`}>
+          {store.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-black text-base sm:text-lg text-white truncate">{store.name}</h3>
+            <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border flex-shrink-0 ${s.badge}`}>
+              {store.category}
+            </span>
+          </div>
+          <p className="text-zinc-500 text-sm mt-0.5 truncate">{store.tagline}</p>
+        </div>
+        <motion.div
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
+          className="flex-shrink-0 text-zinc-500"
+        >
+          <ChevronDown size={20} />
+        </motion.div>
+      </motion.button>
+
+      {/* Accordion məzmunu */}
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            key="content"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 sm:px-5 pb-5 pt-1 space-y-4">
+              {/* Nümunə məhsullar */}
+              <div className="grid grid-cols-2 gap-2.5">
+                {store.products.map((p, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05, duration: 0.25 }}
+                    whileHover={{ scale: 1.03, y: -2 }}
+                    className={`rounded-2xl border overflow-hidden flex flex-col gap-0 transition-all duration-200 cursor-default ${s.chip}`}
+                  >
+                    <div className="w-full aspect-square flex items-center justify-center bg-black/20 overflow-hidden">
+                      {p.image ? (
+                        <img src={p.image} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                      ) : (
+                        <span className="text-3xl leading-none">{p.icon}</span>
+                      )}
+                    </div>
+                    <div className="p-3 flex flex-col gap-1">
+                      <p className="text-white text-sm font-bold leading-tight line-clamp-1">{p.name}</p>
+                      <p className={`text-xs font-black ${s.priceText}`}>{p.price}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              <p className="text-zinc-600 text-xs flex items-center gap-1.5">
+                <Sparkles size={12} className="flex-shrink-0" />
+                Bunlar nümunə məhsullardır — tam çeşid üçün Instagram səhifəsinə bax
+              </p>
+
+              {/* CTA düymələri */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <motion.a
+                  href={`${toWhatsappLink(store.whatsapp)}?text=${waMessage}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="flex items-center justify-center gap-2 bg-[#25D366] text-black py-3.5 rounded-2xl font-black text-sm hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366]/60 transition-all shadow-lg shadow-[#25D366]/10"
+                >
+                  <MessageCircle size={16} strokeWidth={2.5} />
+                  Sifariş ver
+                </motion.a>
+                <motion.a
+                  href={store.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="flex items-center justify-center gap-2 bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white py-3.5 rounded-2xl font-black text-sm hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/60 transition-all shadow-lg shadow-pink-500/10"
+                >
+                  <InstagramIcon size={16} />
+                  Instagram
+                </motion.a>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+
 export default function ClientView() {
   const [code, setCode]       = useState("");
   const [client, setClient]   = useState(null);
@@ -474,6 +721,9 @@ export default function ClientView() {
 
   // Tab
   const [activeTab, setActiveTab] = useState("workout");
+
+  // Mağaza accordion
+  const [openStoreId, setOpenStoreId] = useState(null);
 
   // Bütün state-i bir yerdən tətbiq edən köməkçi
   const applyState = (s) => {
@@ -793,6 +1043,7 @@ export default function ClientView() {
     { id:"body",     label:"Ölçü",    icon:Scale },
     { id:"progress", label:"Analiz",  icon:BarChart2 },
     { id:"badges",   label:"Medallər",icon:Award },
+    { id:"shop",     label:"Mağaza",  icon:ShoppingBag },
   ];
 
   return (
@@ -1381,6 +1632,39 @@ export default function ClientView() {
                   );
                 })}
               </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ═══════════════════ TAB: MAĞAZA ═══════════════════ */}
+        {activeTab==="shop" && (
+          <motion.div key="shop" initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{duration:0.25}} className="space-y-4">
+            {/* İntro banner */}
+            <div className="bg-gradient-to-br from-zinc-900/80 to-zinc-900/40 p-5 rounded-3xl border border-white/6 relative overflow-hidden">
+              <div className="absolute -top-8 -right-8 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
+              <div className="relative flex items-start gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                  <Package size={20} className="text-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="text-white font-black text-lg">Tərəfdaş Mağazalar</h2>
+                  <p className="text-zinc-500 text-sm mt-0.5">
+                    Güvənilir mağazalardan idman qidası və ləvazimatları. Klikləyib genişləndir, sifariş üçün birbaşa yaz.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Mağaza siyahısı */}
+            <div className="space-y-3">
+              {STORES.map((store) => (
+                <StoreAccordion
+                  key={store.id}
+                  store={store}
+                  isOpen={openStoreId === store.id}
+                  onToggle={() => setOpenStoreId((prev) => (prev === store.id ? null : store.id))}
+                />
+              ))}
             </div>
           </motion.div>
         )}

@@ -4,33 +4,45 @@ import {
   Menu, Search, ArrowUpDown, QrCode, Settings, Check, AlertCircle, Info,
   TrendingUp, TrendingDown, Share2, ChevronRight, Loader2, User, Mail,
   Sparkles, ClipboardList, Phone, Target, Scale, Cake, FileText, Camera,
-  LayoutGrid, List, Clock, UserPlus, Tag
+  LayoutGrid, List, Clock, UserPlus, Tag, Download, CheckSquare, Square,
+  StickyNote, FileDown
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 /* ----------------------------------------------------------------------
-   Helpers
+   Qeyd: Bu fayl "client_progress" cədvəlini aşağıdakı sxemlə istifadə edir:
+   id (uuid) | client_id (uuid, clients.id-yə FK) | weight (numeric, null ola bilər)
+   | note (text, null ola bilər) | created_at (timestamptz)
+
+   DİQQƏT: ClientView.jsx-də olan müştəri tərəfindəki gündəlik state
+   (qaçış/su/kalori və s.) AYRI bir cədvəldə ("client_daily_state") saxlanmalıdır,
+   çünki o fərqli sxem istifadə edir (access_code + jsonb data). Əgər hər iki
+   fayl eyni "client_progress" adını fərqli sxemlə istifadə etsə, məşqçinin
+   əlavə etdiyi tərəqqi qeydləri ilə müştərinin gündəlik state-i toqquşar və
+   "Tərəqqi" bölməsi bəzən boş və ya səhv görünə bilər.
+
+   SQL (Supabase-də bir dəfə işə salınmalıdır):
+
+   create table if not exists client_daily_state (
+     access_code text primary key,
+     data jsonb not null default '{}'::jsonb,
+     updated_at timestamptz not null default now()
+   );
+
+   create table if not exists client_progress (
+     id uuid primary key default gen_random_uuid(),
+     client_id uuid references clients(id) on delete cascade,
+     weight numeric,
+     note text,
+     created_at timestamptz not null default now()
+   );
 ---------------------------------------------------------------------- */
 
-// Cryptographically-safe, human-friendly access code (no 0/O/1/I confusion)
-function generateAccessCode(length = 6) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const random = new Uint32Array(length);
-  crypto.getRandomValues(random);
-  return Array.from(random, (n) => chars[n % chars.length]).join("");
-}
-
-async function getUniqueAccessCode() {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const code = generateAccessCode();
-    const { data } = await supabase.from("clients").select("id").eq("access_code", code).maybeSingle();
-    if (!data) return code;
-  }
-  // Astronomically unlikely fallback
-  return generateAccessCode(8);
-}
+/* ----------------------------------------------------------------------
+   Helpers
+---------------------------------------------------------------------- */
 
 // Groups clients by real calendar month (year-aware) and sorts chronologically
 function buildChartData(clientList) {
@@ -47,6 +59,54 @@ function buildChartData(clientList) {
       name: b.date.toLocaleDateString("az-AZ", { month: "short", year: "2-digit" }),
       musteri: b.count,
     }));
+}
+
+// Escapes a value for safe CSV embedding (quotes, commas, newlines)
+function csvEscape(value) {
+  const str = value == null ? "" : String(value);
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+// Builds and downloads a CSV file from the given client list
+function downloadClientsCSV(clientList, trainerName = "musteriler") {
+  const headers = ["Ad Soyad", "Giriş Kodu", "Qeydiyyat tarixi", "Qeydlər"];
+  const rows = clientList.map((c) => [
+    c.full_name || "",
+    c.access_code || "",
+    c.created_at ? new Date(c.created_at).toLocaleDateString("az-AZ") : "",
+    c.notes || "",
+  ]);
+  const csv = [headers, ...rows].map((r) => r.map(csvEscape).join(",")).join("\n");
+  // BOM prefix so Excel opens Azerbaijani characters correctly
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const safeName = trainerName.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "musteriler";
+  a.download = `${safeName}-musteriler-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Fetches a remote QR image and triggers a PNG download (works around
+// browsers blocking direct cross-origin <img> right-click-save)
+async function downloadQrPng(accessCode, clientName) {
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(accessCode)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("QR fetch failed");
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objUrl;
+  const safeName = (clientName || "musteri").trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  a.download = `${safeName}-qr-${accessCode}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objUrl);
 }
 
 function isSameMonth(dateStr, ref) {
@@ -228,6 +288,23 @@ export default function Dashboard() {
   // Clients tab: list vs grid
   const [clientView, setClientView] = useState("list"); // list | grid
 
+  // Bulk select / delete
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // CSV export
+  const [exportingCsv, setExportingCsv] = useState(false);
+
+  // QR PNG download
+  const [downloadingQr, setDownloadingQr] = useState(false);
+
+  // Notes (drawer)
+  const [notesDraft, setNotesDraft] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [notesDirty, setNotesDirty] = useState(false);
+
   // Toasts
   const [toasts, setToasts] = useState([]);
   const pushToast = (type, message) => {
@@ -342,10 +419,11 @@ export default function Dashboard() {
         if (error) throw error;
         pushToast("success", `${clientForm.name.trim()} yeniləndi.`);
       } else {
-        const accessCode = await getUniqueAccessCode();
+        // access_code buraxılır — Supabase-dəki trigger (trg_set_access_code)
+        // yeni sətir üçün özü avtomatik 10 simvollu unikal kod yaradır.
         const { error } = await supabase
           .from("clients")
-          .insert([{ trainer_id: user.id, full_name: clientForm.name.trim(), profile_data: cleanFields, access_code: accessCode }]);
+          .insert([{ trainer_id: user.id, full_name: clientForm.name.trim(), profile_data: cleanFields }]);
         if (error) throw error;
         pushToast("success", `${clientForm.name.trim()} əlavə edildi.`);
       }
@@ -373,6 +451,107 @@ export default function Dashboard() {
       pushToast("error", "Silinmə zamanı xəta baş verdi.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  /* ---------------- Bulk select / delete ---------------- */
+
+  const toggleSelectMode = () => {
+    setSelectMode((v) => !v);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelectClient = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedIds((prev) => {
+      const allSelected = filteredClients.every((c) => prev.has(c.id));
+      if (allSelected) return new Set();
+      return new Set(filteredClients.map((c) => c.id));
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const { error } = await supabase.from("clients").delete().in("id", ids);
+      if (error) throw error;
+      pushToast("success", `${ids.length} müştəri silindi.`);
+      setBulkDeleteConfirm(false);
+      setSelectMode(false);
+      setSelectedIds(new Set());
+      fetchInitialData();
+    } catch (err) {
+      console.error(err);
+      pushToast("error", "Silinmə zamanı xəta baş verdi.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  /* ---------------- CSV export ---------------- */
+
+  const handleExportCsv = () => {
+    if (filteredClients.length === 0) {
+      pushToast("info", "İxrac ediləcək müştəri yoxdur.");
+      return;
+    }
+    setExportingCsv(true);
+    try {
+      downloadClientsCSV(filteredClients, profile?.full_name);
+      pushToast("success", "CSV faylı yükləndi.");
+    } catch (err) {
+      console.error(err);
+      pushToast("error", "CSV yaradılmadı.");
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
+  /* ---------------- QR PNG download ---------------- */
+
+  const handleDownloadQr = async (client) => {
+    setDownloadingQr(true);
+    try {
+      await downloadQrPng(client.access_code, client.full_name);
+      pushToast("success", "QR kod şəkil olaraq yükləndi.");
+    } catch (err) {
+      console.error(err);
+      pushToast("error", "QR kod yüklənmədi. Yenidən cəhd et.");
+    } finally {
+      setDownloadingQr(false);
+    }
+  };
+
+  /* ---------------- Notes ---------------- */
+
+  const saveNotes = async () => {
+    if (!activeClient) return;
+    setSavingNotes(true);
+    try {
+      const { error } = await supabase.from("clients").update({ notes: notesDraft }).eq("id", activeClient.id);
+      if (error) throw error;
+      setActiveClient((prev) => (prev ? { ...prev, notes: notesDraft } : prev));
+      setClients((prev) => prev.map((c) => (c.id === activeClient.id ? { ...c, notes: notesDraft } : c)));
+      setNotesDirty(false);
+      pushToast("success", "Qeyd yadda saxlandı.");
+    } catch (err) {
+      console.error(err);
+      if (err.code === "42703" || err.message?.toLowerCase().includes("column")) {
+        pushToast("error", "\"notes\" sütunu verilənlər bazasında tapılmadı. SQL addımını icra etdiyinə əmin ol.");
+      } else {
+        pushToast("error", "Qeyd yadda saxlanmadı.");
+      }
+    } finally {
+      setSavingNotes(false);
     }
   };
 
@@ -407,6 +586,8 @@ export default function Dashboard() {
     setDrawerTab("info");
     setProgressEntries([]);
     setProgressTableMissing(false);
+    setNotesDraft(client.notes || "");
+    setNotesDirty(false);
   };
 
   useEffect(() => {
@@ -759,13 +940,63 @@ export default function Dashboard() {
           <div className="max-w-3xl fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <h2 className="text-2xl font-bold">Müştərilərim</h2>
-              <button
-                onClick={openNewClient}
-                className="bg-emerald-500 text-black px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:bg-emerald-400 hover:shadow-[0_0_24px_-6px_rgba(16,185,129,0.7)] active:scale-95"
-              >
-                <Plus size={16} /> Əlavə et
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {!loading && clients.length > 0 && (
+                  <>
+                    <button
+                      onClick={handleExportCsv}
+                      disabled={exportingCsv}
+                      title="CSV olaraq yüklə"
+                      className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-300 hover:border-zinc-700 hover:text-emerald-400 transition-colors disabled:opacity-60"
+                    >
+                      {exportingCsv ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+                    </button>
+                    <button
+                      onClick={toggleSelectMode}
+                      className={`px-3 py-2.5 rounded-xl text-sm font-bold border transition-colors flex items-center gap-2 ${
+                        selectMode
+                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                      }`}
+                    >
+                      <CheckSquare size={16} /> {selectMode ? "Ləğv et" : "Seç"}
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={openNewClient}
+                  className="bg-emerald-500 text-black px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:bg-emerald-400 hover:shadow-[0_0_24px_-6px_rgba(16,185,129,0.7)] active:scale-95"
+                >
+                  <Plus size={16} /> Əlavə et
+                </button>
+              </div>
             </div>
+
+            {selectMode && (
+              <div className="flex items-center justify-between gap-3 mb-4 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                <button
+                  onClick={toggleSelectAllFiltered}
+                  className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5"
+                >
+                  {filteredClients.length > 0 && filteredClients.every((c) => selectedIds.has(c.id)) ? (
+                    <CheckSquare size={14} />
+                  ) : (
+                    <Square size={14} />
+                  )}
+                  Hamısını seç
+                </button>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400">{selectedIds.size} seçildi</span>
+                  <button
+                    onClick={() => setBulkDeleteConfirm(true)}
+                    disabled={selectedIds.size === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-bold hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 size={13} /> Sil
+                  </button>
+                </div>
+              </div>
+            )}
 
             {!loading && clients.length > 0 && (
               <div className="flex flex-col sm:flex-row gap-3 mb-6">
@@ -846,20 +1077,37 @@ export default function Dashboard() {
                     const isNew = Date.now() - new Date(c.created_at).getTime() < 7 * 86400 * 1000;
 
                     if (clientView === "grid") {
+                      const isSelected = selectedIds.has(c.id);
                       return (
                         <div
                           key={c.id}
                           style={{ animationDelay: `${Math.min(idx, 8) * 40}ms` }}
-                          className={`card-in group relative p-5 bg-zinc-900/80 border border-zinc-800 rounded-2xl flex flex-col items-center text-center transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-700`}
+                          className={`card-in group relative p-5 bg-zinc-900/80 border rounded-2xl flex flex-col items-center text-center transition-all duration-200 hover:-translate-y-0.5 ${
+                            isSelected ? "border-emerald-500/50 ring-1 ring-emerald-500/30" : "border-zinc-800 hover:border-zinc-700"
+                          }`}
                           onMouseEnter={(e) => (e.currentTarget.style.boxShadow = `0 12px 32px -14px ${palette.glow}`)}
                           onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
                         >
+                          {selectMode && (
+                            <button
+                              onClick={() => toggleSelectClient(c.id)}
+                              aria-label={isSelected ? "Seçimi ləğv et" : "Seç"}
+                              className={`absolute top-3 left-3 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                                isSelected ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 border border-zinc-700"
+                              }`}
+                            >
+                              {isSelected ? <Check size={14} /> : null}
+                            </button>
+                          )}
                           {isNew && (
                             <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 neon-pulse" /> Yeni
                             </span>
                           )}
-                          <button onClick={() => openClientDrawer(c)} className="flex flex-col items-center w-full">
+                          <button
+                            onClick={() => (selectMode ? toggleSelectClient(c.id) : openClientDrawer(c))}
+                            className="flex flex-col items-center w-full"
+                          >
                             <div className={`w-16 h-16 rounded-full bg-gradient-to-br ${palette.bg} border ${palette.border} ${palette.text} font-bold text-lg flex items-center justify-center mb-3`}>
                               {initials(c.full_name)}
                             </div>
@@ -870,24 +1118,43 @@ export default function Dashboard() {
                               <span className="flex items-center gap-1"><Clock size={11} /> {timeAgo(c.created_at)}</span>
                             </div>
                           </button>
-                          <div className="flex gap-1 mt-4 pt-4 border-t border-zinc-800 w-full justify-center">
-                            <button onClick={() => openEditClient(c)} aria-label={`${c.full_name} redaktə et`} className="p-2 hover:bg-zinc-800 text-emerald-400 rounded-lg transition-colors"><Edit3 size={15} /></button>
-                            <button onClick={() => copyCode(c.access_code)} aria-label={`${c.full_name} kodunu kopyala`} className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"><Copy size={15} /></button>
-                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, name: c.full_name })} aria-label={`${c.full_name} sil`} className="p-2 hover:bg-red-900/30 text-red-400 rounded-lg transition-colors"><Trash2 size={15} /></button>
-                          </div>
+                          {!selectMode && (
+                            <div className="flex gap-1 mt-4 pt-4 border-t border-zinc-800 w-full justify-center">
+                              <button onClick={() => openEditClient(c)} aria-label={`${c.full_name} redaktə et`} className="p-2 hover:bg-zinc-800 text-emerald-400 rounded-lg transition-colors"><Edit3 size={15} /></button>
+                              <button onClick={() => copyCode(c.access_code)} aria-label={`${c.full_name} kodunu kopyala`} className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"><Copy size={15} /></button>
+                              <button onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, name: c.full_name })} aria-label={`${c.full_name} sil`} className="p-2 hover:bg-red-900/30 text-red-400 rounded-lg transition-colors"><Trash2 size={15} /></button>
+                            </div>
+                          )}
                         </div>
                       );
                     }
 
+                    const isSelectedRow = selectedIds.has(c.id);
                     return (
                       <div
                         key={c.id}
                         style={{ animationDelay: `${Math.min(idx, 8) * 40}ms` }}
-                        className={`card-in group relative p-4 sm:p-5 bg-zinc-900/80 border border-zinc-800 rounded-2xl flex items-center justify-between gap-3 transition-all duration-200 hover:border-zinc-700 hover:bg-zinc-900`}
+                        className={`card-in group relative p-4 sm:p-5 bg-zinc-900/80 border rounded-2xl flex items-center justify-between gap-3 transition-all duration-200 hover:bg-zinc-900 ${
+                          isSelectedRow ? "border-emerald-500/50 ring-1 ring-emerald-500/30" : "border-zinc-800 hover:border-zinc-700"
+                        }`}
                         onMouseEnter={(e) => (e.currentTarget.style.boxShadow = `0 10px 28px -14px ${palette.glow}`)}
                         onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
                       >
-                        <button onClick={() => openClientDrawer(c)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+                        {selectMode && (
+                          <button
+                            onClick={() => toggleSelectClient(c.id)}
+                            aria-label={isSelectedRow ? "Seçimi ləğv et" : "Seç"}
+                            className={`w-6 h-6 shrink-0 rounded-md flex items-center justify-center transition-colors ${
+                              isSelectedRow ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 border border-zinc-700"
+                            }`}
+                          >
+                            {isSelectedRow ? <Check size={14} /> : null}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => (selectMode ? toggleSelectClient(c.id) : openClientDrawer(c))}
+                          className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                        >
                           <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${palette.bg} border ${palette.border} ${palette.text} font-bold text-sm flex items-center justify-center shrink-0`}>
                             {initials(c.full_name)}
                           </div>
@@ -912,30 +1179,32 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </button>
-                        <div className="flex gap-1 shrink-0">
-                          <button
-                            onClick={() => openEditClient(c)}
-                            aria-label={`${c.full_name} redaktə et`}
-                            className="p-2.5 hover:bg-zinc-800 text-emerald-400 rounded-lg transition-colors"
-                          >
-                            <Edit3 size={16} />
-                          </button>
-                          <button
-                            onClick={() => copyCode(c.access_code)}
-                            aria-label={`${c.full_name} kodunu kopyala`}
-                            className="p-2.5 hover:bg-zinc-800 rounded-lg transition-colors"
-                          >
-                            <Copy size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, name: c.full_name })}
-                            aria-label={`${c.full_name} sil`}
-                            className="p-2.5 hover:bg-red-900/30 text-red-400 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                          <ChevronRight size={16} className="self-center text-zinc-700 hidden sm:block ml-1" />
-                        </div>
+                        {!selectMode && (
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              onClick={() => openEditClient(c)}
+                              aria-label={`${c.full_name} redaktə et`}
+                              className="p-2.5 hover:bg-zinc-800 text-emerald-400 rounded-lg transition-colors"
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                            <button
+                              onClick={() => copyCode(c.access_code)}
+                              aria-label={`${c.full_name} kodunu kopyala`}
+                              className="p-2.5 hover:bg-zinc-800 rounded-lg transition-colors"
+                            >
+                              <Copy size={16} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, name: c.full_name })}
+                              aria-label={`${c.full_name} sil`}
+                              className="p-2.5 hover:bg-red-900/30 text-red-400 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                            <ChevronRight size={16} className="self-center text-zinc-700 hidden sm:block ml-1" />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1048,6 +1317,33 @@ export default function Dashboard() {
                 className="flex-1 py-2.5 rounded-xl bg-red-500 text-black text-sm font-bold hover:bg-red-400 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
               >
                 {deleting ? <Loader2 size={14} className="animate-spin" /> : null} Sil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------- BULK DELETE CONFIRM ----------------------------- */}
+      {bulkDeleteConfirm && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="modal-in bg-zinc-900 border border-red-500/30 p-6 rounded-3xl w-full max-w-xs shadow-[0_0_30px_-10px_rgba(239,68,68,0.4)]">
+            <h3 className="font-bold text-lg mb-1">{selectedIds.size} müştərini silmək istəyirsiniz?</h3>
+            <p className="text-zinc-500 text-sm">
+              Seçilmiş <span className="text-zinc-300 font-medium">{selectedIds.size}</span> müştəri həmişəlik silinəcək. Bu əməliyyat geri qaytarıla bilməz.
+            </p>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setBulkDeleteConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl bg-zinc-800 text-sm hover:bg-zinc-700 transition-colors"
+              >
+                Xeyr
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="flex-1 py-2.5 rounded-xl bg-red-500 text-black text-sm font-bold hover:bg-red-400 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {bulkDeleting ? <Loader2 size={14} className="animate-spin" /> : null} Sil
               </button>
             </div>
           </div>
@@ -1199,7 +1495,6 @@ export default function Dashboard() {
               {[
                 { id: "info", label: "Məlumat", icon: Users },
                 { id: "qr", label: "QR / Kod", icon: QrCode },
-                { id: "progress", label: "Tərəqqi", icon: TrendingUp },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -1232,6 +1527,27 @@ export default function Dashboard() {
                   >
                     <Edit3 size={14} /> Redaktə et
                   </button>
+
+                  <div className="pt-2">
+                    <p className="text-[11px] text-zinc-500 font-bold uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                      <StickyNote size={12} /> Qeydlər
+                    </p>
+                    <textarea
+                      value={notesDraft}
+                      onChange={(e) => { setNotesDraft(e.target.value); setNotesDirty(true); }}
+                      placeholder="Bu müştəri haqqında sürətli qeyd yaz... (yalnız sənə görünür)"
+                      rows={4}
+                      className="input-focus w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none focus:border-emerald-500/50 resize-none"
+                    />
+                    <button
+                      onClick={saveNotes}
+                      disabled={!notesDirty || savingNotes}
+                      className="mt-2 w-full py-2.5 bg-emerald-500 text-black rounded-xl text-sm font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {savingNotes ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                      Qeydi saxla
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1262,88 +1578,14 @@ export default function Dashboard() {
                       <Share2 size={14} /> Paylaş
                     </button>
                   </div>
-                </div>
-              )}
-
-              {drawerTab === "progress" && (
-                <div className="fade-in">
-                  {progressTableMissing ? (
-                    <EmptyState
-                      icon={Info}
-                      title="Tərəqqi cədvəli hazır deyil"
-                      subtitle={`Bu funksiya üçün verilənlər bazasında "client_progress" cədvəli yaradılmalıdır. Birgə təqdim olunan SQL faylına bax.`}
-                    />
-                  ) : progressLoading ? (
-                    <div className="space-y-2">
-                      <SkeletonBlock className="h-14" />
-                      <SkeletonBlock className="h-14" />
-                    </div>
-                  ) : (
-                    <>
-                      {progressEntries.length === 0 ? (
-                        <p className="text-zinc-500 text-sm mb-4">Hələ qeyd yoxdur. İlk ölçünü əlavə et.</p>
-                      ) : (
-                        <div className="h-40 mb-5 -ml-2">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={progressEntries.filter((p) => p.weight != null)} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#1E222D" vertical={false} />
-                              <XAxis
-                                dataKey="created_at"
-                                tickFormatter={(v) => new Date(v).toLocaleDateString("az-AZ", { day: "2-digit", month: "2-digit" })}
-                                stroke="#373A46"
-                                fontSize={10}
-                                tickLine={false}
-                                axisLine={false}
-                              />
-                              <YAxis stroke="#373A46" fontSize={10} tickLine={false} axisLine={false} width={28} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: "#1E222D", border: "1px solid #373A46", borderRadius: "8px", fontSize: "12px" }}
-                                labelFormatter={(v) => new Date(v).toLocaleDateString("az-AZ")}
-                              />
-                              <Area type="monotone" dataKey="weight" stroke="#10b981" strokeWidth={2} fill="#10b98122" />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
-                      )}
-
-                      <div className="space-y-2 mb-5 max-h-40 overflow-y-auto">
-                        {[...progressEntries].reverse().map((p) => (
-                          <div key={p.id} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex justify-between items-center gap-3">
-                            <div className="min-w-0">
-                              {p.note && <p className="text-sm truncate">{p.note}</p>}
-                              <p className="text-zinc-500 text-[11px]">{new Date(p.created_at).toLocaleDateString("az-AZ")}</p>
-                            </div>
-                            {p.weight != null && <span className="text-emerald-400 font-mono text-sm shrink-0">{p.weight} kg</span>}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl space-y-2">
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            placeholder="Çəki (kg)"
-                            value={newProgress.weight}
-                            onChange={(e) => setNewProgress({ ...newProgress, weight: e.target.value })}
-                            className="w-full sm:w-1/3 bg-zinc-950 p-2 rounded-lg text-xs border border-zinc-800 focus:outline-none focus:border-emerald-500/50 input-focus"
-                          />
-                          <input
-                            placeholder="Qeyd (məs: yaxşı irəliləyiş)"
-                            value={newProgress.note}
-                            onChange={(e) => setNewProgress({ ...newProgress, note: e.target.value })}
-                            className="flex-1 bg-zinc-950 p-2 rounded-lg text-xs border border-zinc-800 focus:outline-none focus:border-emerald-500/50 input-focus"
-                          />
-                        </div>
-                        <button
-                          onClick={addProgressEntry}
-                          className="w-full py-2 bg-emerald-500 text-black rounded-lg text-xs font-bold hover:bg-emerald-400 transition-colors"
-                        >
-                          Qeyd əlavə et
-                        </button>
-                      </div>
-                    </>
-                  )}
+                  <button
+                    onClick={() => handleDownloadQr(activeClient)}
+                    disabled={downloadingQr}
+                    className="w-full mt-3 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-colors disabled:opacity-60"
+                  >
+                    {downloadingQr ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    QR-ı şəkil olaraq yüklə (PNG)
+                  </button>
                 </div>
               )}
             </div>
